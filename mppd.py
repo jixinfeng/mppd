@@ -3,6 +3,7 @@ import feedparser
 import requests
 import time
 import string
+import multiprocessing as mp
 from pathlib import Path
 
 
@@ -26,13 +27,24 @@ class PodcastDownloader:
     
     def download_all(self):
         self.root_path.mkdir(exist_ok=True)
+        mp_pool = mp.Pool()
         for entry in self.entries:
-            self.download_and_process(entry)
-        
-    def download_and_process(self, entry):
+            mp_pool.apply_async(
+                func=self.download_and_process,
+                args=(entry,)
+            )
+
+        mp_pool.close()
+        mp_pool.join()
+
+    @staticmethod
+    def download_and_process(entry):
         print("[{}] downloading {}".format(entry['index'], entry['title']))
-        folder_path = self.root_path / entry['sub_path']
-        folder_path.mkdir(parents=True, exist_ok=True)
+        root_path = entry['root_path']
+        folder_path = root_path / entry['sub_path']
+        if folder_path != root_path:
+            folder_path.mkdir(parents=True, exist_ok=True)
+
         file_path = folder_path / entry['file_name']
         tmp_path = file_path.with_suffix('.tmp')
 
@@ -42,7 +54,12 @@ class PodcastDownloader:
             return
         if tmp_path.exists():
             tmp_path.unlink()
-        self.download_episode(episode_link, tmp_path)
+        r = requests.get(episode_link, stream=True)
+        with tmp_path.open(mode='wb') as tmp_file_handle:
+            for chunk in r.iter_content(chunk_size=4*1024*1024):
+                if chunk:
+                    tmp_file_handle.write(chunk)
+
         tmp_path.rename(file_path)
         return
 
@@ -68,19 +85,11 @@ class PodcastDownloader:
                 'year': year,
                 'date': date,
                 'title': title,
+                'root_path': self.root_path,
                 'sub_path': Path(sub_path),
                 'file_name': Path(filename)
             })
         return entries
-
-    @staticmethod
-    def download_episode(link, file_path):
-        r = requests.get(link, stream=True) 
-        with file_path.open(mode='wb') as f:
-            for chunk in r.iter_content(chunk_size=4*1024*1024): 
-                if chunk: 
-                    f.write(chunk) 
-        return
 
     @staticmethod
     def valid_filename(filename, valid_chars=valid_chars):
