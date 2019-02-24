@@ -1,31 +1,41 @@
 import argparse
 import feedparser
-import pathlib
 import requests
 import time
 import string
+from pathlib import Path
 
 
 class PodcastDownloader:
     valid_chars = frozenset("-_.() {}{}".format(string.ascii_letters, string.digits))
 
-    def __init__(self, rss):
+    def __init__(self, rss, by_year, per_season):
         feed = feedparser.parse(rss)
-        self.author = feed.channel.author_detail.name
-        self.album = feed.channel.title
-        self.entries = self.parse_entries(feed)
-        self.dir_name = pathlib.Path("{} - {}".format(self.author, self.album))
+        try:
+            author = feed.channel.author_detail.name
+        except AttributeError:
+            author = None
+        album = feed.channel.title
+        if author:
+            self.root_path = Path("{} - {}".format(author, album))
+        else:
+            self.root_path = Path(album)
+
+        self.entries = self.parse_entries(feed, by_year, per_season)
         return
     
     def download_all(self):
-        self.dir_name.mkdir(exist_ok=True)
+        self.root_path.mkdir(exist_ok=True)
         for entry in self.entries:
             self.download_and_process(entry)
         
     def download_and_process(self, entry):
         print("[{}] downloading {}".format(entry['index'], entry['title']))
-        file_path = self.dir_name / entry['file_name']
+        folder_path = self.root_path / entry['sub_path']
+        folder_path.mkdir(parents=True, exist_ok=True)
+        file_path = folder_path / entry['file_name']
         tmp_path = file_path.with_suffix('.tmp')
+
         episode_link = entry['link']
         if file_path.exists():
             print("{} exists".format(file_path))
@@ -36,12 +46,19 @@ class PodcastDownloader:
         tmp_path.rename(file_path)
         return
 
-    def parse_entries(self, feed):
+    def parse_entries(self, feed, by_year=False, per_seasons=None):
         entries = []
-        for index, entry in enumerate(feed.entries):
+        if by_year and per_seasons:
+            raise ValueError("Only one of by_year or by_season should be True")
+        for index, entry in enumerate(feed.entries[::-1]):
+            sub_path = ""
+            if per_seasons:
+                sub_path = "S" + str(index // per_seasons)
             link = entry.links[0].href
             published = entry['published_parsed']
             year = published.tm_year
+            if by_year:
+                sub_path = str(year)
             date = time.strftime("%Y%m%d", published)
             title = entry['title']
             filename = self.valid_filename("{} - {}.mp3".format(date, title))
@@ -51,7 +68,8 @@ class PodcastDownloader:
                 'year': year,
                 'date': date,
                 'title': title,
-                'file_name': filename
+                'sub_path': Path(sub_path),
+                'file_name': Path(filename)
             })
         return entries
 
@@ -78,14 +96,30 @@ def parse_args():
         action='store',
         help="RSS Feed of podcast"
     )
+    parser.add_argument(
+        '--year',
+        action='store_true',
+        help="Save episodes into sub folders by publish year"
+    )
+    parser.add_argument(
+        '--by_season',
+        metavar='by-season',
+        type=int,
+        default=0,
+        help="Save episodes into sub folders by seasons, with chosen number of episodes per season"
+    )
     args = parser.parse_args()
+    if args.year and args.by_season:
+        raise ValueError("year and by_season can not be used at same time")
 
     return args
 
 
 def main(args):
     d = PodcastDownloader(
-        rss=args.rss_feed
+        rss=args.rss_feed,
+        by_year=args.year,
+        per_season=args.by_season
     )
 
     d.download_all()
