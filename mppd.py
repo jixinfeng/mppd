@@ -13,14 +13,14 @@ class PodcastDownloader:
     def __init__(self, rss, by_year, per_season):
         feed = feedparser.parse(rss)
         try:
-            author = feed.channel.author_detail.name
+            self.author = feed.channel.author_detail.name
         except AttributeError:
-            author = None
-        album = feed.channel.title
-        if author:
-            self.root_path = Path("{} - {}".format(author, album))
+            self.author = None
+        self.album = feed.channel.title
+        if self.author:
+            self.root_path = Path(self.valid_filename("{}-{}".format(self.author, self.album)))
         else:
-            self.root_path = Path(album)
+            self.root_path = Path(self.valid_filename(self.album))
 
         self.entries = self.parse_entries(feed, by_year, per_season)
         return
@@ -37,9 +37,29 @@ class PodcastDownloader:
         mp_pool.close()
         mp_pool.join()
 
+    def generate_abb_scripts(self):
+        subpaths = sorted({str(entry['sub_path']) for entry in self.entries})
+        scripts = {
+            subpath: ["abbinder -s -o {}_{}.m4b -r 22050 -b 32 -c 1 -t {} -a {}".format(
+                self.valid_filename(self.album), i, self.album, self.author
+            )] for i, subpath in enumerate(subpaths)}
+        for entry in self.entries:
+            full_path = entry['root_path'] / entry['sub_path'] / entry['file_name']
+            title = entry['title']
+            scripts[str(entry['sub_path'])].append(
+                "'@{}@' {}".format(title, full_path)
+            )
+        for subpath in subpaths:
+            if subpath == ".":
+                script_name = Path("{}.sh".format(self.root_path))
+            else:
+                script_name = Path("{}_{}.sh".format(self.root_path, subpath))
+
+            with script_name.open(mode='w') as f:
+                f.write(" \\\n".join(scripts[subpath]))
+
     @staticmethod
     def download_and_process(entry):
-        print("[{}] downloading {}".format(entry['index'], entry['title']))
         root_path = entry['root_path']
         folder_path = root_path / entry['sub_path']
         if folder_path != root_path:
@@ -55,6 +75,11 @@ class PodcastDownloader:
         if tmp_path.exists():
             tmp_path.unlink()
         r = requests.get(episode_link, stream=True)
+        print("[{}] downloading {} --> {}".format(
+            entry['index'],
+            entry['title'],
+            file_path
+        ))
         with tmp_path.open(mode='wb') as tmp_file_handle:
             for chunk in r.iter_content(chunk_size=4*1024*1024):
                 if chunk:
@@ -78,7 +103,8 @@ class PodcastDownloader:
                 sub_path = str(year)
             date = time.strftime("%Y%m%d", published)
             title = entry['title']
-            filename = self.valid_filename("{} - {}.mp3".format(date, title))
+            sub_path = self.valid_filename(sub_path)
+            filename = self.valid_filename("{}-{}.mp3".format(date, title))
             entries.append({
                 'index': index,
                 'link': link,
@@ -93,7 +119,8 @@ class PodcastDownloader:
 
     @staticmethod
     def valid_filename(filename, valid_chars=valid_chars):
-        return ''.join(c for c in filename if c in valid_chars)
+        valid_filename = ''.join(c for c in filename if c in valid_chars)
+        return valid_filename.replace(' ', '_')
 
 
 def parse_args():
@@ -117,6 +144,11 @@ def parse_args():
         default=0,
         help="Save episodes into sub folders by seasons, with chosen number of episodes per season"
     )
+    parser.add_argument(
+        '--script',
+        action='store_true',
+        help="If selected, generate script to bind episodes into audiobook file via Audiobook Binder"
+    )
     args = parser.parse_args()
     if args.year and args.by_season:
         raise ValueError("year and by_season can not be used at same time")
@@ -132,6 +164,8 @@ def main(args):
     )
 
     d.download_all()
+    if args.script:
+        d.generate_abb_scripts()
 
 
 if __name__ == "__main__":
