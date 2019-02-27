@@ -7,3 +7,7 @@ will test on other feeds in the future
 Requires feedparser
 
 Audiobook build scripts requires [Audiobook Binder](http://bluezbox.com/audiobookbinder.html), make sure the `abbinder` is in your `$PATH`
+
+# Known Issue
+
+`abbinder` may throw segfault at chapter building phase at the end of file conversion, especially when chapter list is long
