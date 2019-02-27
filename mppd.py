@@ -10,7 +10,7 @@ from pathlib import Path
 class PodcastDownloader:
     valid_chars = frozenset("-_.() {}{}".format(string.ascii_letters, string.digits))
 
-    def __init__(self, rss, by_year, per_season):
+    def __init__(self, rss, by_year):
         feed = feedparser.parse(rss)
         try:
             self.author = feed.channel.author_detail.name
@@ -22,7 +22,7 @@ class PodcastDownloader:
         else:
             self.root_path = Path(self.valid_filename(self.album))
 
-        self.entries = self.parse_entries(feed, by_year, per_season)
+        self.entries = self.parse_entries(feed, by_year)
         return
     
     def download_all(self):
@@ -88,14 +88,10 @@ class PodcastDownloader:
         tmp_path.rename(file_path)
         return
 
-    def parse_entries(self, feed, by_year=False, per_seasons=None):
+    def parse_entries(self, feed, by_year=False):
         entries = []
-        if by_year and per_seasons:
-            raise ValueError("Only one of by_year or by_season should be True")
         for index, entry in enumerate(feed.entries[::-1]):
             sub_path = ""
-            if per_seasons:
-                sub_path = "S" + str(index // per_seasons)
             link = entry.links[0].href
             published = entry['published_parsed']
             year = published.tm_year
@@ -138,20 +134,11 @@ def parse_args():
         help="Save episodes into sub folders by publish year"
     )
     parser.add_argument(
-        '--by_season',
-        metavar='by-season',
-        type=int,
-        default=0,
-        help="Save episodes into sub folders by seasons, with chosen number of episodes per season"
-    )
-    parser.add_argument(
         '--script',
         action='store_true',
         help="If selected, generate script to bind episodes into audiobook file via Audiobook Binder"
     )
     args = parser.parse_args()
-    if args.year and args.by_season:
-        raise ValueError("year and by_season can not be used at same time")
 
     return args
 
@@ -160,7 +147,6 @@ def main(args):
     d = PodcastDownloader(
         rss=args.rss_feed,
         by_year=args.year,
-        per_season=args.by_season
     )
 
     d.download_all()
