@@ -3,15 +3,16 @@ import feedparser
 import requests
 import time
 import string
-import multiprocessing as mp
 from pathlib import Path
+from concurrent.futures import ThreadPoolExecutor, wait
 
 
 class PodcastDownloader:
     valid_chars = frozenset("-_.() {}{}".format(string.ascii_letters, string.digits))
 
-    def __init__(self, rss, by_year):
+    def __init__(self, rss, by_year, n_threads=4):
         feed = feedparser.parse(rss)
+        self.n_threads = n_threads
         try:
             self.author = feed.channel.author_detail.name
         except AttributeError:
@@ -27,15 +28,8 @@ class PodcastDownloader:
     
     def download_all(self):
         self.root_path.mkdir(exist_ok=True)
-        mp_pool = mp.Pool()
-        for entry in self.entries:
-            mp_pool.apply_async(
-                func=self.download_and_process,
-                args=(entry,)
-            )
-
-        mp_pool.close()
-        mp_pool.join()
+        with ThreadPoolExecutor(self.n_threads) as mt_pool:
+            _ = mt_pool.map(self.download_and_process, self.entries)
 
     def generate_abb_scripts(self):
         subpaths = sorted({str(entry['sub_path']) for entry in self.entries})
@@ -70,18 +64,18 @@ class PodcastDownloader:
 
         episode_link = entry['link']
         if file_path.exists():
-            print("{} exists".format(file_path))
+            print("[SKIPPING] {}".format(file_path))
             return
         if tmp_path.exists():
             tmp_path.unlink()
         r = requests.get(episode_link, stream=True)
-        print("[{}] downloading {} --> {}".format(
-            entry['index'],
+        print("[DOWNLOADING] {} {} --> {}".format(
+            entry['date'],
             entry['title'],
             file_path
         ))
         with tmp_path.open(mode='wb') as tmp_file_handle:
-            for chunk in r.iter_content(chunk_size=4*1024*1024):
+            for chunk in r.iter_content(chunk_size=16*1024*1024):
                 if chunk:
                     tmp_file_handle.write(chunk)
 
@@ -137,6 +131,12 @@ def parse_args():
         '--script',
         action='store_true',
         help="If selected, generate script to bind episodes into audiobook file via Audiobook Binder"
+    )
+    parser.add_argument(
+        '--threads',
+        type=int,
+        default=4,
+        help="Number of parallel downloads, default=4"
     )
     args = parser.parse_args()
 
