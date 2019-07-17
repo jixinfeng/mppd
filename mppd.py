@@ -3,88 +3,64 @@ import feedparser
 import requests
 import time
 import string
+from collections import namedtuple
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor, wait
 
+ParsedEntry = namedtuple('ParsedEntry', ['index', 'link', 'year', 'date', 'title', 'root_path', 'sub_path', 'file_name'])
+ParsedFeed = namedtuple('ParsedFeed', ['author', 'album', 'root_path', 'episodes'])
+
 
 class PodcastDownloader:
-    valid_chars = frozenset("-_.() {}{}".format(string.ascii_letters, string.digits))
-
-    def __init__(self, rss, by_year, n_threads=4):
-        feed = feedparser.parse(rss)
+    def __init__(self, rss_url, by_year, n_threads=4):
+        raw_feed = feedparser.parse(rss_url)
         self.n_threads = n_threads
-        try:
-            self.author = feed.channel.author_detail.name
-        except AttributeError:
-            self.author = None
-        self.album = feed.channel.title
-        if self.author:
-            self.root_path = Path(self.valid_filename("{}-{}".format(self.author, self.album)))
-        else:
-            self.root_path = Path(self.valid_filename(self.album))
-
-        self.entries = self.parse_entries(feed, by_year)
+        self.parsed_feeds = self.parse_feed(raw_feed, by_year)
         return
-    
+
     def download_all(self):
-        self.root_path.mkdir(exist_ok=True)
+        self.parsed_feeds.root_path.mkdir(exist_ok=True)
         with ThreadPoolExecutor(self.n_threads) as mt_pool:
-            _ = mt_pool.map(self.download_and_process, self.entries)
+            _ = mt_pool.map(self.download_and_process, self.parsed_feeds.episodes)
 
-    def generate_abb_scripts(self):
-        subpaths = sorted({str(entry['sub_path']) for entry in self.entries})
-        scripts = {
-            subpath: ["abbinder -s -o {}_{}.m4b -r 22050 -b 32 -c 1 -t {} -a {}".format(
-                self.valid_filename(self.album), i, self.album, self.author
-            )] for i, subpath in enumerate(subpaths)}
-        for entry in self.entries:
-            full_path = entry['root_path'] / entry['sub_path'] / entry['file_name']
-            title = entry['title']
-            scripts[str(entry['sub_path'])].append(
-                "'@{}@' {}".format(title, full_path)
-            )
-        for subpath in subpaths:
-            if subpath == ".":
-                script_name = Path("{}.sh".format(self.root_path))
-            else:
-                script_name = Path("{}_{}.sh".format(self.root_path, subpath))
-
-            with script_name.open(mode='w') as f:
-                f.write(" \\\n".join(scripts[subpath]))
+        return
 
     @staticmethod
-    def download_and_process(entry):
-        root_path = entry['root_path']
-        folder_path = root_path / entry['sub_path']
+    def download_and_process(entry, write_chunk=16):
+        root_path = entry.root_path
+        folder_path = root_path / entry.sub_path
         if folder_path != root_path:
             folder_path.mkdir(parents=True, exist_ok=True)
 
-        file_path = folder_path / entry['file_name']
+        file_path = folder_path / entry.file_name
         tmp_path = file_path.with_suffix('.tmp')
 
-        episode_link = entry['link']
+        episode_link = entry.link
         if file_path.exists():
-            print("[SKIPPING] {}".format(file_path))
+            print(f"[SKIPPING] {file_path}")
             return
         if tmp_path.exists():
             tmp_path.unlink()
         r = requests.get(episode_link, stream=True)
-        print("[DOWNLOADING] {} {} --> {}".format(
-            entry['date'],
-            entry['title'],
-            file_path
-        ))
+        print(f"[DOWNLOADING] {entry.date} {entry.title} --> {file_path}")
         with tmp_path.open(mode='wb') as tmp_file_handle:
-            for chunk in r.iter_content(chunk_size=16*1024*1024):
+            for chunk in r.iter_content(chunk_size=write_chunk*1024*1024):
                 if chunk:
                     tmp_file_handle.write(chunk)
 
         tmp_path.rename(file_path)
         return
 
-    def parse_entries(self, feed, by_year=False):
-        entries = []
-        for index, entry in enumerate(feed.entries[::-1]):
+    def parse_feed(self, raw_feed, by_year=False):
+        feed_info = self._get_feed_info(raw_feed)
+        parsed_feed = ParsedFeed(
+            author=feed_info['author'],
+            album=feed_info['album'],
+            root_path=feed_info['root_path'],
+            episodes=[]
+        )
+
+        for index, entry in enumerate(raw_feed.entries[::-1]):
             sub_path = ""
             link = entry.links[0].href
             published = entry['published_parsed']
@@ -93,24 +69,62 @@ class PodcastDownloader:
                 sub_path = str(year)
             date = time.strftime("%Y%m%d", published)
             title = entry['title']
-            sub_path = self.valid_filename(sub_path)
-            filename = self.valid_filename("{}-{}.mp3".format(date, title))
-            entries.append({
-                'index': index,
-                'link': link,
-                'year': year,
-                'date': date,
-                'title': title,
-                'root_path': self.root_path,
-                'sub_path': Path(sub_path),
-                'file_name': Path(filename)
-            })
-        return entries
+            sub_path = Path(get_valid_filename(sub_path))
+            filename = Path(get_valid_filename(f"{date}-{title}.mp3"))
+            parsed_feed.episodes.append(ParsedEntry(
+                index=index, link=link, year=year,
+                date=date, title=title, root_path=parsed_feed.root_path,
+                sub_path=sub_path, file_name=filename
+            ))
+        return parsed_feed
 
     @staticmethod
-    def valid_filename(filename, valid_chars=valid_chars):
-        valid_filename = ''.join(c for c in filename if c in valid_chars)
-        return valid_filename.replace(' ', '_')
+    def _get_feed_info(raw_feed):
+        try:
+            author = raw_feed.channel.author_detail.name
+        except AttributeError:
+            author = None
+
+        try:
+            album = raw_feed.channel.title
+        except AttributeError:
+            album = None
+
+        if author:
+            root_path = Path(get_valid_filename(f"{author}-{album}"))
+        else:
+            root_path = Path(get_valid_filename(album))
+
+        return {"author": author, "album": album, "root_path": root_path}
+
+
+def get_valid_filename(filename, valid_chars=None):
+    if not valid_chars:
+        valid_chars = frozenset(f"-_.() {string.ascii_letters}{string.digits}")
+    valid_filename = ''.join(c for c in filename if c in valid_chars)
+    return valid_filename.replace(' ', '_')
+
+
+def generate_abb_scripts(feed):
+    subpaths = sorted({str(entry.sub_path) for entry in feed.episodes})
+    scripts = {
+        subpath: [
+            f"abbinder -s -o {get_valid_filename(feed.album)}_{i}.m4b -r 22050 -b 32 -c 1 -t {feed.album} -a {feed.author}"
+        ] for i, subpath in enumerate(subpaths)
+    }
+    for entry in feed:
+        full_path = entry.root_path / entry.sub_path / entry.file_name
+        title = entry.title
+        scripts[str(entry.sub_path)].append(f"'@{title}@' {full_path}")
+    for subpath in subpaths:
+        if subpath == ".":
+            script_name = Path(f"{feed.root_path}.sh")
+        else:
+            script_name = Path(f"{feed.root_path}_{subpath}.sh")
+
+        with script_name.open(mode='w') as f:
+            f.write(" \\\n".join(scripts[subpath]))
+    return
 
 
 def parse_args():
@@ -120,7 +134,7 @@ def parse_args():
         metavar='rss-feed',
         type=str,
         action='store',
-        help="RSS Feed of podcast"
+        help="RSS Feed of Podcast"
     )
     parser.add_argument(
         '--year',
@@ -145,13 +159,14 @@ def parse_args():
 
 def main(args):
     d = PodcastDownloader(
-        rss=args.rss_feed,
+        rss_url=args.rss_feed,
         by_year=args.year,
+        n_threads=args.threads
     )
 
     d.download_all()
     if args.script:
-        d.generate_abb_scripts()
+        generate_abb_scripts(d.parsed_feeds)
 
 
 if __name__ == "__main__":
