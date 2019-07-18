@@ -5,7 +5,7 @@ import time
 import string
 from collections import namedtuple
 from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor, wait
+from concurrent.futures import ThreadPoolExecutor
 
 ParsedEntry = namedtuple('ParsedEntry', ['index', 'link', 'year', 'date', 'title', 'root_path', 'sub_path', 'file_name'])
 ParsedFeed = namedtuple('ParsedFeed', ['author', 'album', 'root_path', 'episodes'])
@@ -21,12 +21,12 @@ class PodcastDownloader:
     def download_all(self):
         self.parsed_feeds.root_path.mkdir(exist_ok=True)
         with ThreadPoolExecutor(self.n_threads) as mt_pool:
-            _ = mt_pool.map(self.download_and_process, self.parsed_feeds.episodes)
+            _ = mt_pool.map(self.download_episode, self.parsed_feeds.episodes)
 
         return
 
     @staticmethod
-    def download_and_process(entry, write_chunk=16):
+    def download_episode(entry, write_chunk=16):
         root_path = entry.root_path
         folder_path = root_path / entry.sub_path
         if folder_path != root_path:
