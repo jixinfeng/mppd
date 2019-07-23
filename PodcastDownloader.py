@@ -1,11 +1,8 @@
 import argparse
 import feedparser
-import requests
 import time
-import string
 from collections import namedtuple
-from pathlib import Path
-from concurrent.futures import ThreadPoolExecutor
+from helper_functions import *
 
 ParsedEntry = namedtuple('ParsedEntry', ['index', 'link', 'year', 'date', 'title', 'root_path', 'sub_path', 'file_name'])
 ParsedFeed = namedtuple('ParsedFeed', ['author', 'album', 'root_path', 'episodes'])
@@ -96,35 +93,6 @@ class PodcastDownloader:
             root_path = Path(get_valid_filename(album))
 
         return {"author": author, "album": album, "root_path": root_path}
-
-
-def get_valid_filename(filename, valid_chars=None):
-    if not valid_chars:
-        valid_chars = frozenset(f"-_.() {string.ascii_letters}{string.digits}")
-    valid_filename = ''.join(c for c in filename if c in valid_chars)
-    return valid_filename.replace(' ', '_')
-
-
-def generate_abb_scripts(feed):
-    subpaths = sorted({str(entry.sub_path) for entry in feed.episodes})
-    scripts = {
-        subpath: [
-            f"abbinder -s -o {get_valid_filename(feed.album)}_{i}.m4b -r 22050 -b 32 -c 1 -t {feed.album} -a {feed.author}"
-        ] for i, subpath in enumerate(subpaths)
-    }
-    for entry in feed:
-        full_path = entry.root_path / entry.sub_path / entry.file_name
-        title = entry.title
-        scripts[str(entry.sub_path)].append(f"'@{title}@' {full_path}")
-    for subpath in subpaths:
-        if subpath == ".":
-            script_name = Path(f"{feed.root_path}.sh")
-        else:
-            script_name = Path(f"{feed.root_path}_{subpath}.sh")
-
-        with script_name.open(mode='w') as f:
-            f.write(" \\\n".join(scripts[subpath]))
-    return
 
 
 def parse_args():

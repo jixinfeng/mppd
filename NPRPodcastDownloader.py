@@ -1,6 +1,5 @@
-import json
-from bs4 import BeautifulSoup
 from PodcastDownloader import *
+from helper_functions import *
 
 
 class NPRPodcastDownloader(PodcastDownloader):
@@ -53,10 +52,10 @@ def main(args):
 
     catalog_prompt = "\nPick a podcast by number: "
     catalog_message = "\n".join([f"{i}: {podcast['title']}" for i, podcast in podcasts.items()]) + catalog_prompt
-    if not args.program:
+    if args.program not in podcasts:
         print(catalog_message, end="")
         program = input()
-        while program not in podcasts.keys():
+        while program not in podcasts:
             print(catalog_message, end="")
             program = input()
     else:

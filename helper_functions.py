@@ -2,6 +2,14 @@ import json
 import requests
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
+
+
+def get_valid_filename(filename, valid_chars=None):
+    if not valid_chars:
+        valid_chars = frozenset(f"-_.() {string.ascii_letters}{string.digits}")
+    valid_filename = ''.join(c for c in filename if c in valid_chars)
+    return valid_filename.replace(' ', '_')
 
 
 def get_rss_from_page(podcast):
@@ -33,6 +41,28 @@ def get_npr_podcasts_catalog():
 
     with open('npr_podcasts.json', 'w') as catalog:
         json.dump(podcast_catalog, catalog, indent=4)
+
+
+def generate_abb_scripts(feed):
+    subpaths = sorted({str(entry.sub_path) for entry in feed.episodes})
+    scripts = {
+        subpath: [
+            f"abbinder -s -o {get_valid_filename(feed.album)}_{i}.m4b -r 22050 -b 32 -c 1 -t {feed.album} -a {feed.author}"
+        ] for i, subpath in enumerate(subpaths)
+    }
+    for entry in feed:
+        full_path = entry.root_path / entry.sub_path / entry.file_name
+        title = entry.title
+        scripts[str(entry.sub_path)].append(f"'@{title}@' {full_path}")
+    for subpath in subpaths:
+        if subpath == ".":
+            script_name = Path(f"{feed.root_path}.sh")
+        else:
+            script_name = Path(f"{feed.root_path}_{subpath}.sh")
+
+        with script_name.open(mode='w') as f:
+            f.write(" \\\n".join(scripts[subpath]))
+    return
 
 
 if __name__ == "__main__":
