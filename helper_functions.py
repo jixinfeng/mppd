@@ -1,5 +1,6 @@
 import json
 import requests
+import string
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -26,9 +27,9 @@ def get_npr_podcasts_catalog():
     catalog_soup = BeautifulSoup(catalog_html, 'html.parser')
     link_block = catalog_soup.find_all('a')
     podcast_list = [
-        (l.getText().strip(), l['href'])
+        (l.getText().strip(), l.attrs.get('href', ""))
         for l in link_block
-        if l['href'].startswith('https://www.npr.org/podcasts/')
+        if l.attrs.get('href', "").startswith('https://www.npr.org/podcasts/')
     ]
 
     with ThreadPoolExecutor() as mt_pool:
@@ -39,7 +40,7 @@ def get_npr_podcasts_catalog():
         title, rss_url = podcast
         podcast_catalog[i + 1] = {'title': title, 'url': rss_url}
 
-    with open('npr_podcasts.json', 'w') as catalog:
+    with open('feeds/npr_podcasts.json', 'w') as catalog:
         json.dump(podcast_catalog, catalog, indent=4)
 
 

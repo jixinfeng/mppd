@@ -3,8 +3,8 @@ from helper_functions import *
 
 
 class NPRPodcastDownloader(PodcastDownloader):
-    def __init__(self, rss_url, get_transcript=True):
-        super().__init__(rss_url=rss_url, by_year=True)
+    def __init__(self, rss_url, get_transcript=True, by_year=True):
+        super().__init__(rss_url=rss_url, by_year=by_year)
         self.get_transcript = get_transcript
 
     def download_episode(self, entry, write_chunk=16):
@@ -39,7 +39,15 @@ def parse_args():
         type=str,
         action='store',
         default=None,
-        help="Choosing program by its id, leave blank to see the full list"
+        help="Choosing program by its id"
+    )
+    parser.add_argument(
+        '--rss_feed', '-r',
+        metavar='rss-feed',
+        type=str,
+        action='store',
+        default=None,
+        help="RSS Feed of Podcast, this overrides --program, leave both blank to choose manually"
     )
     args = parser.parse_args()
 
@@ -47,21 +55,31 @@ def parse_args():
 
 
 def main(args):
-    with open('npr_podcasts.json', 'r') as catalog:
+    with open('feeds/npr_podcasts.json', 'r') as catalog:
         podcasts = json.load(catalog)
 
     catalog_prompt = "\nPick a podcast by number: "
     catalog_message = "\n".join([f"{i}: {podcast['title']}" for i, podcast in podcasts.items()]) + catalog_prompt
-    if args.program not in podcasts:
+    if args.rss_feed:
+        valid_rss = {p["url"] for _, p in podcasts.items()}
+        if args.rss_feed not in valid_rss:
+            raise ValueError("Invalid RSS Feed")
+        else:
+            rss_feed = args.rss_feed
+    elif args.program:
+        if args.program not in podcasts:
+            raise ValueError("Invalid Program id")
+        else:
+            rss_feed = podcasts[args.program]['url']
+    else:
         print(catalog_message, end="")
         program = input()
         while program not in podcasts:
             print(catalog_message, end="")
             program = input()
-    else:
-        program = args.program
 
-    rss_feed = podcasts[program]['url']
+        rss_feed = podcasts[args.program]['url']
+
     d = NPRPodcastDownloader(rss_url=rss_feed)
     d.download_all()
 
