@@ -21,4 +21,5 @@ $ python PodcastDownloader.py --year -r {podcast_feed}
 
 # Known Issue
 
-`abbinder` may throw segfault at chapter building phase at the end of file conversion, especially when chapter list is long
+* `abbinder` may throw segfault at chapter building phase at the end of file conversion, especially when chapter list is long
+* Life Kit feed won't be included in `npr_podcasts.json` automatically because it has a different url pattern. It can be manually added though.
