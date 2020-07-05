@@ -3,11 +3,11 @@ from helper_functions import *
 
 
 class NPRPodcastDownloader(PodcastDownloader):
-    def __init__(self, rss_url, get_transcript=True, by_year=True):
+    def __init__(self, rss_url: str, get_transcript: bool = True, by_year: bool = True):
         super().__init__(rss_url=rss_url, by_year=by_year)
         self.get_transcript = get_transcript
 
-    def download_episode(self, entry, write_chunk=16):
+    def download_episode(self, entry: ParsedEntry, write_chunk: int = 16):
         super().download_episode(entry, write_chunk)
 
         if self.get_transcript:

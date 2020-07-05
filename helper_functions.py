@@ -4,16 +4,35 @@ import string
 from bs4 import BeautifulSoup
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
+from typing import List, Tuple, NamedTuple
 
 
-def get_valid_filename(filename, valid_chars=None):
+class ParsedEntry(NamedTuple):
+    index: int
+    link: str
+    year: str
+    date: str
+    title: str
+    root_path: Path
+    sub_path: Path
+    file_name: Path
+
+
+class ParsedFeed(NamedTuple):
+    author: str
+    album: str
+    root_path: Path
+    episodes: List[ParsedEntry]
+
+
+def get_valid_filename(filename: str, valid_chars=None, invalid_chars=None) -> str:
     if not valid_chars:
         valid_chars = frozenset(f"-_.() {string.ascii_letters}{string.digits}")
     valid_filename = ''.join(c for c in filename if c in valid_chars)
     return valid_filename.replace(' ', '_')
 
 
-def get_rss_from_page(podcast):
+def get_rss_from_page(podcast: Tuple[str, str]) -> Tuple[str, str]:
     title, page_url = podcast
     page_html = requests.get(page_url).text
     page_soup = BeautifulSoup(page_html, 'html.parser')
@@ -21,7 +40,7 @@ def get_rss_from_page(podcast):
     return title, page_rss
 
 
-def get_npr_podcasts_catalog():
+def get_npr_podcasts_catalog() -> None:
     catalog_url = 'https://www.npr.org/programs/'
     catalog_html = requests.get(catalog_url).text
     catalog_soup = BeautifulSoup(catalog_html, 'html.parser')
@@ -44,7 +63,7 @@ def get_npr_podcasts_catalog():
         json.dump(podcast_catalog, catalog, indent=4)
 
 
-def generate_abb_scripts(feed):
+def generate_abb_scripts(feed: ParsedFeed) -> None:
     subpaths = sorted({str(entry.sub_path) for entry in feed.episodes})
     scripts = {
         subpath: [

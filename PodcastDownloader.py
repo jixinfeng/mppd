@@ -1,21 +1,19 @@
 import argparse
 import feedparser
 import time
-from collections import namedtuple
+from typing import List
+from feedparser import FeedParserDict
 from helper_functions import *
-
-ParsedEntry = namedtuple('ParsedEntry', ['index', 'link', 'year', 'date', 'title', 'root_path', 'sub_path', 'file_name'])
-ParsedFeed = namedtuple('ParsedFeed', ['author', 'album', 'root_path', 'episodes'])
 
 
 class PodcastDownloader:
-    def __init__(self, rss_url, by_year, n_threads=4):
+    def __init__(self, rss_url: str, by_year: bool, n_threads: int = 4):
         raw_feed = feedparser.parse(rss_url)
         self.n_threads = n_threads
         self.parsed_feeds = self.parse_feed(raw_feed, by_year)
         return
 
-    def download_all(self):
+    def download_all(self) -> None:
         self.parsed_feeds.root_path.mkdir(exist_ok=True)
         with ThreadPoolExecutor(self.n_threads) as mt_pool:
             _ = mt_pool.map(self.download_episode, self.parsed_feeds.episodes)
@@ -23,7 +21,7 @@ class PodcastDownloader:
         return
 
     @staticmethod
-    def download_episode(entry, write_chunk=16):
+    def download_episode(entry: ParsedEntry, write_chunk: int = 16):
         root_path = entry.root_path
         folder_path = root_path / entry.sub_path
         if folder_path != root_path:
@@ -34,8 +32,11 @@ class PodcastDownloader:
 
         episode_link = entry.link
         if file_path.exists():
-            print(f"[SKIPPING] {file_path}")
-            return
+            if file_path.stat().st_size < 10 ** 6:
+                file_path.unlink()
+            else:
+                print(f"[SKIPPING] {file_path}")
+                return
         if tmp_path.exists():
             tmp_path.unlink()
         r = requests.get(episode_link, stream=True)
@@ -48,8 +49,8 @@ class PodcastDownloader:
         tmp_path.rename(file_path)
         return
 
-    def parse_feed(self, raw_feed, by_year=False):
-        feed_info = self._get_feed_info(raw_feed)
+    def parse_feed(self, raw_feed: FeedParserDict, by_year: bool = False) -> ParsedFeed:
+        feed_info = self.__get_feed_info(raw_feed)
         parsed_feed = ParsedFeed(
             author=feed_info['author'],
             album=feed_info['album'],
@@ -59,7 +60,7 @@ class PodcastDownloader:
 
         for index, entry in enumerate(raw_feed.entries[::-1]):
             sub_path = ""
-            link = entry.links[0].href
+            link = self.__get_download_url(entry.links)
             published = entry['published_parsed']
             year = published.tm_year
             if by_year:
@@ -76,7 +77,7 @@ class PodcastDownloader:
         return parsed_feed
 
     @staticmethod
-    def _get_feed_info(raw_feed):
+    def __get_feed_info(raw_feed: FeedParserDict) -> dict:
         try:
             author = raw_feed.channel.author_detail.name
         except AttributeError:
@@ -93,6 +94,18 @@ class PodcastDownloader:
             root_path = Path(get_valid_filename(album))
 
         return {"author": author, "album": album, "root_path": root_path}
+
+    @staticmethod
+    def __get_download_url(url_list: List[FeedParserDict]) -> str:
+        for url_entry in url_list:
+            if url_entry.type == "audio/mpeg":
+                raw_link = url_entry.href
+                if '.mp3' in raw_link:
+                    return raw_link.split('.mp3')[0] + '.mp3'
+                elif '.mp4' in raw_link:
+                    return raw_link.split('.mp4')[0] + '.mp4'
+
+        raise ValueError(f"No valid url found in {[entry.href for entry in url_list]}")
 
 
 def parse_args():
@@ -117,7 +130,7 @@ def parse_args():
     parser.add_argument(
         '--threads',
         type=int,
-        default=4,
+        default=1,
         help="Number of parallel downloads, default=4"
     )
     args = parser.parse_args()
